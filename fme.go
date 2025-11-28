@@ -52,8 +52,8 @@ type Engine interface {
 //
 // The interfer map is kept separate for simplicity and cheaper lookups.
 type Schema struct {
-	Graph     *core.Graph
-	interfers map[string]map[string]struct{}
+	Graph			*core.Graph
+	Interferences	map[string]map[string]struct{}
 }
 
 // CombinationResult is the outcome of validating a concrete user combination.
@@ -74,7 +74,7 @@ type CombinationResult struct {
 func NewSchema() *Schema {
 	return &Schema{
 		Graph:     core.NewGraph(core.WithDirected(true)),
-		interfers: make(map[string]map[string]struct{}),
+		Interferences: make(map[string]map[string]struct{}),
 	}
 }
 
@@ -108,25 +108,25 @@ func (s *Schema) Interfer(a, b string) (bool, error) {
 		return false, fmt.Errorf("Self interference")
 	}
 
-	if s.interfers[a] == nil {
-		s.interfers[a] = make(map[string]struct{})
+	if s.Interferences[a] == nil {
+		s.Interferences[a] = make(map[string]struct{})
 	}
-	if s.interfers[b] == nil {
-		s.interfers[b] = make(map[string]struct{})
+	if s.Interferences[b] == nil {
+		s.Interferences[b] = make(map[string]struct{})
 	}
-	s.interfers[a][b] = struct{}{}
-	s.interfers[b][a] = struct{}{}
+	s.Interferences[a][b] = struct{}{}
+	s.Interferences[b][a] = struct{}{}
 
 	// Rollback if schema is invalid
 	if err := s.ValidateSchema(); err != nil {
-		delete(s.interfers[a], b)
-    	delete(s.interfers[b], a)
+		delete(s.Interferences[a], b)
+    	delete(s.Interferences[b], a)
 
-		if len(s.interfers[a]) == 0 {
-			delete(s.interfers, a)
+		if len(s.Interferences[a]) == 0 {
+			delete(s.Interferences, a)
 		}
-		if len(s.interfers[b]) == 0 {
-			delete(s.interfers, b)
+		if len(s.Interferences[b]) == 0 {
+			delete(s.Interferences, b)
 		}
 		return false, err
 	}
@@ -155,7 +155,7 @@ func (s *Schema) ValidateSchema() error {
 	}
 
 	// 2. Ensure that no interfering pair is forced by dependencies.
-	for a, row := range s.interfers {
+	for a, row := range s.Interferences {
 		for b := range row {
 			// Work with each unordered pair only once (a < b).
 			if a >= b {
@@ -182,7 +182,7 @@ func (s *Schema) ValidateSchema() error {
 // ValidateCombination:
 //
 //   - expands the initial combination by adding all transitive dependencies;
-//   - checks for interfers in the resulting closure;
+//   - checks for Interferences in the resulting closure;
 //   - returns CombinationResult and either nil or ErrCombinationInterfer.
 //
 // This is the function you would typically call per user request.
@@ -212,8 +212,8 @@ func (s *Schema) ValidateCombination(combination []string) (*CombinationResult, 
 	}
 	sort.Slice(final, func(i, j int) bool { return final[i] < final[j] })
 
-	// Now check interfers inside the closure.
-	for a, row := range s.interfers {
+	// Now check Interferences inside the closure.
+	for a, row := range s.Interferences {
 		for b := range row {
 			if a >= b {
 				continue
