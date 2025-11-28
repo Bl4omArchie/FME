@@ -1,0 +1,304 @@
+package fme
+
+// High-level pseudocode (how lvlath is used to solve OTO-style constraints):
+//
+//  1. Build a directed dependency graph G over Flag IDs using core.Graph.
+//     For each rule "A requires B", add a directed edge A -> B with weight 0.
+//  2. Maintain a separate symmetric interfer relation C ⊆ V×V in a Go map.
+//  3. At service startup:
+//     a) Run dfs.TopologicalSort(G) to ensure that dependencies form a DAG.
+//        If a cycle is found, reject the schema (misconfigured rules).
+//     b) For each interfer {a, b} in C, run bfs.BFS(G, a) and bfs.BFS(G, b).
+//        If a and b are mutually reachable via "requires" edges, reject
+//        the schema as contradictory.
+//  4. For each user combination S:
+//     a) Compute closure(S) by running BFS from every a ∈ S over G,
+//        adding all reachable Flags to the set "need".
+//     b) If "need" contains any interfering pair {a, b} ∈ C, reject the
+//        combination, optionally explaining the shortest implication chain.
+//     c) Otherwise, build an induced subgraph on "need" and run
+//        dfs.TopologicalSort to get a safe execution order for tasks.
+//
+// This example is a skeleton for an "Flag-constraints engine" that can
+// sit underneath a scheduler like OTO while staying small, explicit, and
+// easy to explain to users.
+
+import (
+	"errors"
+	"fmt"
+	"sort"
+
+	"github.com/katalvlaran/lvlath/bfs"
+	"github.com/katalvlaran/lvlath/core"
+	"github.com/katalvlaran/lvlath/dfs"
+)
+
+// Engine is the interface a Schema have to implement
+//
+// Use it to defines the constraints and validation functions
+type Engine interface {
+	ValidateSchema() ([]PathInstance, error)
+	ValidateCombination(c []string) bool
+}
+
+// Schema holds the static constraint model:
+//
+//   - a directed dependency graph (requires edges) over string values;
+//   - a symmetric interfer relation stored as a map of sets.
+//
+// The graph is used for:
+//   - computing the transitive closure of dependencies via BFS;
+//   - checking for cycles and building execution order via DFS.
+//
+// The interfer map is kept separate for simplicity and cheaper lookups.
+type Schema struct {
+	Graph     *core.Graph
+	interfers map[string]map[string]struct{}
+}
+
+// CombinationResult is the outcome of validating a concrete user combination.
+//
+//   - Final   is the closure(combination): selected Flags + all dependencies;
+//   - Interfer is non-nil if a interfering pair was detected.
+type CombinationResult struct {
+	Final    []string
+	Interfer *PathInstance
+}
+
+// NewSchema constructs a directed, unweighted dependency graph backed by
+// lvlath/core and an empty interfer relation.
+//
+// Complexity of operations on this structure is dominated by BFS/DFS:
+//   - Schema validation: O(V + E + C * (V + E)) in the worst case;
+//   - Combination validation: O(|S| * (V + E) + C) for practical sizes.
+func NewSchema() *Schema {
+	return &Schema{
+		Graph:     core.NewGraph(core.WithDirected(true)),
+		interfers: make(map[string]map[string]struct{}),
+	}
+}
+
+// Require declares a dependency A → B meaning “A requires B”.
+// In the graph this is represented as a directed edge A -> B.
+func (s *Schema) Require(a, b string) (bool, error) {
+	ensureFlag(s.Graph, a)
+	ensureFlag(s.Graph, b)
+
+	// Unweighted dependency edge: weight = 0.
+	_, _ = s.Graph.AddEdge(string(a), string(b), 0)
+
+	// Rollback if schema is invalid
+	if err := s.ValidateSchema(); err != nil {
+		s.Graph.RemoveVertex(a)
+		s.Graph.RemoveVertex(b)
+		return false, err
+	}
+	return true, nil
+}
+
+// Interfer registers a symmetric interfer between A and B.
+// If A and B end up together in the closure of a combination, that combination
+// is considered invalid.
+func (s *Schema) Interfer(a, b string) (bool, error) {
+	ensureFlag(s.Graph, a)
+	ensureFlag(s.Graph, b)
+
+	if a == b {
+		// A self-interfer does not make sense; ignore defensively.
+		return false, fmt.Errorf("Self interference")
+	}
+
+	if s.interfers[a] == nil {
+		s.interfers[a] = make(map[string]struct{})
+	}
+	if s.interfers[b] == nil {
+		s.interfers[b] = make(map[string]struct{})
+	}
+	s.interfers[a][b] = struct{}{}
+	s.interfers[b][a] = struct{}{}
+
+	// Rollback if schema is invalid
+	if err := s.ValidateSchema(); err != nil {
+		delete(s.interfers[a], b)
+    	delete(s.interfers[b], a)
+
+		if len(s.interfers[a]) == 0 {
+			delete(s.interfers, a)
+		}
+		if len(s.interfers[b]) == 0 {
+			delete(s.interfers, b)
+		}
+		return false, err
+	}
+
+	return true, nil
+}
+
+// ValidateSchema performs static validation of the constraint schema.
+//
+//  1. Ensures that the dependency graph is a DAG via dfs.TopologicalSort.
+//  2. Ensures that no interfer pair {A, B} is such that one is reachable
+//     from the other through “requires” edges (which would be a contradiction).
+//
+// This function is intended to be called once at service startup.
+func (s *Schema) ValidateSchema() error {
+	// 1. Check that the dependency graph is acyclic (DAG).
+	if _, err := dfs.TopologicalSort(s.Graph); err != nil {
+		if errors.Is(err, dfs.ErrCycleDetected) {
+			return &SchemaValidationError{
+				Kind:   ErrSchemaCycle,
+				Detail: "invalid schema: dependency cycle detected in Flag graph",
+			}
+		}
+		// Any other error is unexpected and should be surfaced as-is.
+		return err
+	}
+
+	// 2. Ensure that no interfering pair is forced by dependencies.
+	for a, row := range s.interfers {
+		for b := range row {
+			// Work with each unordered pair only once (a < b).
+			if a >= b {
+				continue
+			}
+
+			if reachable(s.Graph, a, b) || reachable(s.Graph, b, a) {
+				msg := fmt.Sprintf(
+					"invalid schema: %q and %q are declared as interfering, "+
+						"but one is reachable from the other via requires edges",
+					a, b,
+				)
+				return &SchemaValidationError{
+					Kind:   ErrSchemaContradiction,
+					Detail: msg,
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// ValidateCombination:
+//
+//   - expands the initial combination by adding all transitive dependencies;
+//   - checks for interfers in the resulting closure;
+//   - returns CombinationResult and either nil or ErrCombinationInterfer.
+//
+// This is the function you would typically call per user request.
+func (s *Schema) ValidateCombination(combination []string) (*CombinationResult, error) {
+	need := make(map[string]struct{})
+
+	// Make sure all selected Flags exist as vertices.
+	for _, id := range combination {
+		ensureFlag(s.Graph, id)
+	}
+
+	// For each selected Flag, run BFS to collect all dependencies.
+	for _, id := range combination {
+		res, err := bfs.BFS(s.Graph, string(id))
+		if err != nil {
+			return nil, fmt.Errorf("combination: BFS from %q: %w", id, err)
+		}
+		for _, ID := range res.Order {
+			need[string(ID)] = struct{}{}
+		}
+	}
+
+	// Convert to a sorted slice for deterministic output and testinGraph.
+	final := make([]string, 0, len(need))
+	for id := range need {
+		final = append(final, id)
+	}
+	sort.Slice(final, func(i, j int) bool { return final[i] < final[j] })
+
+	// Now check interfers inside the closure.
+	for a, row := range s.interfers {
+		for b := range row {
+			if a >= b {
+				continue
+			}
+			_, hasA := need[a]
+			_, hasB := need[b]
+			if hasA && hasB {
+				ci := ShortestPath(a, b, s.Graph)
+				return &CombinationResult{
+					Final:    final,
+					Interfer: ci,
+				}, ErrCombinationInterfer
+			}
+		}
+	}
+
+	return &CombinationResult{Final: final}, nil
+}
+
+// ExecutionOrder computes a deterministic execution order for the subset
+// of Flags given in Flags, respecting all dependency edges.
+//
+// Internally it builds an induced subgraph on the subset and runs a
+// topological sort via dfs.TopologicalSort.
+func (s *Schema) ExecutionOrder(Flags []string) ([]string, error) {
+	if len(Flags) == 0 {
+		return nil, nil
+	}
+
+	needed := make(map[string]struct{}, len(Flags))
+	for _, id := range Flags {
+		needed[string(id)] = struct{}{}
+	}
+
+	// Build an induced subgraph on the needed vertices.
+	sub := s.Graph.CloneEmpty()
+	for id := range needed {
+		_ = sub.AddVertex(id)
+	}
+
+	for _, e := range s.Graph.Edges() {
+		if _, ok := needed[e.From]; !ok {
+			continue
+		}
+		if _, ok := needed[e.To]; !ok {
+			continue
+		}
+		_, _ = sub.AddEdge(e.From, e.To, e.Weight, core.WithEdgeDirected(e.Directed))
+	}
+
+	order, err := dfs.TopologicalSort(sub)
+	if err != nil {
+		if errors.Is(err, dfs.ErrCycleDetected) {
+			// Should not happen if ValidateSchema has already passed.
+			return nil, &SchemaValidationError{
+				Kind:   ErrSchemaCycle,
+				Detail: "cycle detected in induced subgraph for combination",
+			}
+		}
+		return nil, err
+	}
+
+	out := make([]string, len(order))
+	for i, v := range order {
+		out[i] = string(v)
+	}
+	return out, nil
+}
+
+// reachable runs BFS once and checks whether "to" is reachable from "from"
+// using the Depth map from BFSResult. This is enough for schema-level checks
+// where only reachability matters, not the exact path.
+func reachable(g *core.Graph, from, to string) bool {
+	res, err := bfs.BFS(g, string(from))
+	if err != nil {
+		// In a well-formed schema this should not fail; treat as not reachable.
+		return false
+	}
+
+	_, ok := res.Depth[string(to)]
+	return ok
+}
+
+// ensureFlag makes sure there is a vertex for id in the underlying graph.
+// It is intentionally idempotent: calling it multiple times is safe.
+func ensureFlag(g *core.Graph, id string) {
+	_ = g.AddVertex(string(id))
+}
