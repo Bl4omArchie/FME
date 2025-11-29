@@ -21,3 +21,12 @@ type SchemaValidationError struct {
 
 func (e *SchemaValidationError) Error() string { return e.Detail }
 func (e *SchemaValidationError) Unwrap() error { return e.Kind }
+
+
+type CombinationVerificationError struct {
+	Kind   error
+	Detail string
+	Path *PathInstance
+}
+func (e *CombinationVerificationError) Error() string { return e.Detail }
+func (e *CombinationVerificationError) Unwrap() error { return e.Kind }

@@ -138,3 +138,9 @@ There is a summary of every algorithms we saw in this notebook.
 - Rules : constraints between flags that defines if a combination is valid or not
     - Requires : a dependency between two flags where b must go with a
     - Interfere : two flags cannot be mixed together into the same combination
+
+- Flag :
+- Schema :
+- Combination :
+- Constraint :
+- Conflict :

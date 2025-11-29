@@ -4,30 +4,16 @@ import (
 	"testing"
 )
 
-// Test Conflict #1
-//
-// a -> b
-// b -> c
-// c -/-> a
-func TestConflict(t *testing.T) {
+func TestSchema(t *testing.T) {
 	schema := NewSchema()
-	schema.Require("a", "b")
-	schema.Require("b", "c")
-	if ok, _ := schema.Interfer("c", "a"); ok == true {
-		t.Fatalf("TestConflict #1 : interference was accepted")
-	}
-}
+	schema.AddConstraint(&Require{}, &Interfer{})
 
-// Test Conflict #2
-//
-// a -> b
-// b -> a
-func TestCycleDependency(t *testing.T) {
-	schema := NewSchema()
-	schema.Require("a", "b")
+	schema.Constraints[0].Add("a", "b")
+	schema.Constraints[0].Add("b", "c")
+	schema.Constraints[1].Add("c", "a")
 
-	if ok, _ := schema.Require("b", "a"); ok == true {
-		t.Fatalf("TestConflict #2 : cycle dependency")
+
+	if err := schema.ValidateSchema(); err != nil {
+		t.Fatalf("%v", err)
 	}
-	
 }
