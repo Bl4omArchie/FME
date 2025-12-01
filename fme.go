@@ -33,14 +33,6 @@ import (
 	"github.com/katalvlaran/lvlath/dfs"
 )
 
-// Engine is the interface a Schema have to implement
-//
-// Use it to defines the constraints and validation functions
-type Engine interface {
-	ValidateSchema() ([]PathInstance, error)
-	ValidateCombination(c []string) bool
-}
-
 // Schema holds the static constraint model:
 //
 //   - a directed dependency graph (requires edges) over string values;
@@ -73,7 +65,7 @@ type CombinationResult struct {
 //   - Combination validation: O(|S| * (V + E) + C) for practical sizes.
 func NewSchema() *Schema {
 	return &Schema{
-		Graph:     core.NewGraph(core.WithDirected(true)),
+		Graph:     core.NewGraph(core.WithMixedEdges()),
 		Interferences: make(map[string]map[string]struct{}),
 	}
 }
@@ -86,6 +78,7 @@ func (s *Schema) Require(a, b string) (bool, error) {
 
 	// Unweighted dependency edge: weight = 0.
 	_, _ = s.Graph.AddEdge(string(a), string(b), 0)
+	s.Graph.AddEdge()
 
 	// Rollback if schema is invalid
 	if err := s.ValidateSchema(); err != nil {
