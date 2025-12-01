@@ -36,7 +36,6 @@ import (
 // Schema holds the static constraint model:
 //
 //   - a directed dependency graph (requires edges) over string values;
-//   - a symmetric interfer relation stored as a map of sets.
 //
 // The graph is used for:
 //   - computing the transitive closure of dependencies via BFS;
@@ -45,7 +44,6 @@ import (
 // The interfer map is kept separate for simplicity and cheaper lookups.
 type Schema struct {
 	Graph			*core.Graph
-	Interferences	map[string]map[string]struct{}
 }
 
 // CombinationResult is the outcome of validating a concrete user combination.
@@ -66,7 +64,6 @@ type CombinationResult struct {
 func NewSchema() *Schema {
 	return &Schema{
 		Graph:     core.NewGraph(core.WithMixedEdges()),
-		Interferences: make(map[string]map[string]struct{}),
 	}
 }
 
@@ -77,8 +74,7 @@ func (s *Schema) Require(a, b string) (bool, error) {
 	ensureFlag(s.Graph, b)
 
 	// Unweighted dependency edge: weight = 0.
-	_, _ = s.Graph.AddEdge(string(a), string(b), 0)
-	s.Graph.AddEdge()
+	_, _ = 	s.Graph.AddEdge(string(a), string(b), 0, core.WithEdgeDirected(true))
 
 	// Rollback if schema is invalid
 	if err := s.ValidateSchema(); err != nil {
@@ -101,26 +97,12 @@ func (s *Schema) Interfer(a, b string) (bool, error) {
 		return false, fmt.Errorf("Self interference")
 	}
 
-	if s.Interferences[a] == nil {
-		s.Interferences[a] = make(map[string]struct{})
-	}
-	if s.Interferences[b] == nil {
-		s.Interferences[b] = make(map[string]struct{})
-	}
-	s.Interferences[a][b] = struct{}{}
-	s.Interferences[b][a] = struct{}{}
+	_, _ = 	s.Graph.AddEdge(string(a), string(b), 0, core.WithEdgeDirected(false))
 
 	// Rollback if schema is invalid
 	if err := s.ValidateSchema(); err != nil {
-		delete(s.Interferences[a], b)
-    	delete(s.Interferences[b], a)
-
-		if len(s.Interferences[a]) == 0 {
-			delete(s.Interferences, a)
-		}
-		if len(s.Interferences[b]) == 0 {
-			delete(s.Interferences, b)
-		}
+		s.Graph.RemoveVertex(a)
+		s.Graph.RemoveVertex(b)
 		return false, err
 	}
 
@@ -135,41 +117,36 @@ func (s *Schema) Interfer(a, b string) (bool, error) {
 //
 // This function is intended to be called once at service startup.
 func (s *Schema) ValidateSchema() error {
-	// 1. Check that the dependency graph is acyclic (DAG).
-	if _, err := dfs.TopologicalSort(s.Graph); err != nil {
-		if errors.Is(err, dfs.ErrCycleDetected) {
-			return &SchemaValidationError{
-				Kind:   ErrSchemaCycle,
-				Detail: "invalid schema: dependency cycle detected in Flag graph",
-			}
-		}
-		// Any other error is unexpected and should be surfaced as-is.
-		return err
-	}
+ 	sub := core.NewGraph(core.WithDirected(true))
+    for _, v := range s.Graph.Vertices() {
+        _ = sub.AddVertex(v)
+    }
 
-	// 2. Ensure that no interfering pair is forced by dependencies.
-	for a, row := range s.Interferences {
-		for b := range row {
-			// Work with each unordered pair only once (a < b).
-			if a >= b {
-				continue
-			}
+    for _, e := range s.Graph.Edges() {
+        if e.Directed {
+            _, _ = sub.AddEdge(e.From, e.To, e.Weight, core.WithEdgeDirected(true))
+        }
+    }
 
-			if reachable(s.Graph, a, b) || reachable(s.Graph, b, a) {
-				msg := fmt.Sprintf(
-					"invalid schema: %q and %q are declared as interfering, "+
-						"but one is reachable from the other via requires edges",
-					a, b,
-				)
-				return &SchemaValidationError{
-					Kind:   ErrSchemaContradiction,
-					Detail: msg,
-				}
-			}
-		}
-	}
+    // check DAG
+    if _, err := dfs.TopologicalSort(sub); err != nil {
+        if errors.Is(err, dfs.ErrCycleDetected) {
+            return fmt.Errorf("dependency cycle detected")
+        }
+        return err
+    }
 
-	return nil
+    // check interference conflicts
+    for _, e := range s.Graph.Edges() {
+        if !e.Directed {
+            from, to := e.From, e.To
+            if reachable(sub, from, to) || reachable(sub, to, from) {
+                return fmt.Errorf("interference between %s and %s conflicts with requires edges", from, to)
+            }
+        }
+    }
+
+    return nil
 }
 
 // ValidateCombination:
@@ -204,24 +181,6 @@ func (s *Schema) ValidateCombination(combination []string) (*CombinationResult, 
 		final = append(final, id)
 	}
 	sort.Slice(final, func(i, j int) bool { return final[i] < final[j] })
-
-	// Now check Interferences inside the closure.
-	for a, row := range s.Interferences {
-		for b := range row {
-			if a >= b {
-				continue
-			}
-			_, hasA := need[a]
-			_, hasB := need[b]
-			if hasA && hasB {
-				ci := ShortestPath(a, b, s.Graph)
-				return &CombinationResult{
-					Final:    final,
-					Interfer: ci,
-				}, ErrCombinationInterfer
-			}
-		}
-	}
 
 	return &CombinationResult{Final: final}, nil
 }
