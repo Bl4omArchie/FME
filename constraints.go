@@ -36,6 +36,7 @@ type Constraint interface {
 // Require constraint represent a depedency between two flags
 type Require struct {}
 
+// Add two new vertex in the graph and connect them with a directed edge
 func (r *Require) Add(a, b string, graph *core.Graph) error {
 	ensureFlag(graph, a)
 	ensureFlag(graph, b)
@@ -51,6 +52,7 @@ func (r *Require) Add(a, b string, graph *core.Graph) error {
 	return nil
 }
 
+// Verify the integrity of the graph for Require constraint
 func (r *Require) ValidateSchema(graph *core.Graph) error {
 	if _, err := dfs.TopologicalSort(graph); err != nil {
 		if errors.Is(err, dfs.ErrCycleDetected) {
@@ -65,28 +67,22 @@ func (r *Require) ValidateSchema(graph *core.Graph) error {
 	return nil
 }
 
+// If the Schema is invalid, Rollback() deletes the two vertex in the graph
 func (r *Require) Rollback(a, b string, graph *core.Graph) {
 	graph.RemoveVertex(a)
 	graph.RemoveVertex(b)
 }
 
-func (r *Require) VerifyCombination(c *Combination, graph *core.Graph) error {
-    for _, id := range c.Set {
-        // Ensure vertex exists (matching your previous ensureFlag logic)
-        if graph.HasVertex(id) {
-            return fmt.Errorf("unknown flag %q", id)
-        }
-
-        // BFS closure
-        res, err := bfs.BFS(graph, id)
-        if err != nil {
-            return fmt.Errorf("expand: BFS from %q failed: %w", id, err)
-        }
-
-        for _, v := range res.Order {
-            need[string(v)] = struct{}{}
-        }
-    }
+func (r *Require) VerifyCombination(c *Combination, g *core.Graph) error {
+	for id := range c.Need {
+		res, err := bfs.BFS(g, id)
+		if err != nil {
+			return fmt.Errorf("BFS from %q: %w", id, err)
+		}
+		for _, dep := range res.Order {
+			c.Need[dep] = struct{}{}
+		}
+	}
 	return nil
 }
 
@@ -95,9 +91,8 @@ func (r *Require) VerifyCombination(c *Combination, graph *core.Graph) error {
 // Interfer constraint represent the impossibility for two flags to be mixed together into one combination
 type Interfer struct {}
 
-// Interfer registers a symmetric interfer between A and B.
-// If A and B end up together in the closure of a combination, that combination
-// is considered invalid.
+// Add two new vertex in the graph and connect them with a non-directed edge
+// If A and B end up together in the closure of a combination, that combination is considered invalid.
 func (i *Interfer) Add(a, b string, graph *core.Graph) error {
 	ensureFlag(graph, a)
 	ensureFlag(graph, b)
@@ -156,20 +151,14 @@ func (i *Interfer) Rollback(a, b string, graph *core.Graph) {
 	graph.RemoveVertex(b)
 }
 
-func (i *Interfer) VerifyCombination(c *Combination, graph *core.Graph) error {
-	for a, row := range c.Set {
-		for b := range row {
-			if a >= b {
+func (i *Interfer) VerifyCombination(c *Combination, g *core.Graph) error {
+	for from := range c.Need {
+		for to := range c.Need {
+			if from >= to {
 				continue
 			}
-			_, hasA := combination[a]
-			_, hasB := combination[b]
-			if hasA && hasB {
-				return &CombinationVerificationError{
-					Kind: ErrCombinationInterfer,
-					Detail: "Your interference is creating a conflict with the graph",
-					Path: ShortestPath(a, b, graph),
-				}
+			if reachable(g, from, to) || reachable(g, to, from) {
+				return fmt.Errorf("interference conflict between %q and %q", from, to)
 			}
 		}
 	}

@@ -50,6 +50,14 @@ type Schema struct {
 //   - Set is the closure(combination): selected Flags + all dependencies;
 type Combination struct {
 	Set []string
+	Need map[string]struct{}
+}
+
+func NewCombination(flags []string) *Combination {
+	return &Combination{
+		Set: flags,
+		Need: make(map[string]struct{}),
+	}
 }
 
 // NewSchema constructs a directed, unweighted dependency graph backed by
@@ -97,9 +105,7 @@ func (s *Schema) ValidateSchema() (bool, error) {
 //
 // This is the function you would typically call per user request.
 func (s *Schema) ValidateCombination(flags []string) (*Combination, error) {
-    need := make(map[string]struct{})
-	var combination *Combination
-	combination.Set = flags
+	var combination *Combination = NewCombination(flags)
 
     for _, c := range s.Constraints {
         if err := c.VerifyCombination(combination, s.Graph); err != nil {
@@ -107,13 +113,14 @@ func (s *Schema) ValidateCombination(flags []string) (*Combination, error) {
         }
     }
 
-	final := make([]string, 0, len(need))
-	for id := range need {
+	final := make([]string, 0, len(combination.Need))
+	for id := range combination.Need {
 		final = append(final, id)
 	}
 	sort.Slice(final, func(i, j int) bool { return final[i] < final[j] })
+	combination.Set = final
 
-    return &Combination{Set: final}, nil
+    return combination, nil
 }
 
 
