@@ -25,7 +25,6 @@ package fme
 
 import (
 	"sort"
-	"errors"
 
 	"github.com/katalvlaran/lvlath/bfs"
 	"github.com/katalvlaran/lvlath/core"
