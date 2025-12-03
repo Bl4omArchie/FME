@@ -1,18 +1,21 @@
 package fme
 
+
 import (
 	"fmt"
 	"errors"
 
+	"github.com/katalvlaran/lvlath/bfs"
 	"github.com/katalvlaran/lvlath/dfs"
 	"github.com/katalvlaran/lvlath/core"
 )
+
 
 // A constraint is a type of rule that will be applied to every combination
 // Each constraint can implement this interface in order to be used witth the Schema struct
 type Constraint interface {
 	// Add a new rule
-	Add(a, b string) error
+	Add(a, b string, graph *core.Graph) error
 
 
 	// Take every rules and verify there is no conflict between them and rules from other constraints
@@ -25,15 +28,29 @@ type Constraint interface {
 
 
 	// Take a given set of flags and apply each rules
-	VerifyCombination(combination map[string]struct{}, graph *core.Graph) error
+	VerifyCombination(c *Combination, graph *core.Graph) error
 }
+
 
 
 // Require constraint represent a depedency between two flags
 type Require struct {}
-func (r *Require) Add(a, b string) error {
+
+func (r *Require) Add(a, b string, graph *core.Graph) error {
+	ensureFlag(graph, a)
+	ensureFlag(graph, b)
+
+	// Unweighted dependency edge: weight = 0.
+	_, _ = 	graph.AddEdge(string(a), string(b), 0, core.WithEdgeDirected(true))
+
+	// Rollback if schema is invalid
+	if err := r.ValidateSchema(graph); err != nil {
+		r.Rollback(a, b, graph)
+		return err
+	}
 	return nil
 }
+
 func (r *Require) ValidateSchema(graph *core.Graph) error {
 	if _, err := dfs.TopologicalSort(graph); err != nil {
 		if errors.Is(err, dfs.ErrCycleDetected) {
@@ -47,78 +64,100 @@ func (r *Require) ValidateSchema(graph *core.Graph) error {
 	}
 	return nil
 }
+
 func (r *Require) Rollback(a, b string, graph *core.Graph) {
 	graph.RemoveVertex(a)
 	graph.RemoveVertex(b)
 }
-func (r *Require) VerifyCombination(combination map[string]struct{}, graph *core.Graph) error {
+
+func (r *Require) VerifyCombination(c *Combination, graph *core.Graph) error {
+    for _, id := range c.Set {
+        // Ensure vertex exists (matching your previous ensureFlag logic)
+        if graph.HasVertex(id) {
+            return fmt.Errorf("unknown flag %q", id)
+        }
+
+        // BFS closure
+        res, err := bfs.BFS(graph, id)
+        if err != nil {
+            return fmt.Errorf("expand: BFS from %q failed: %w", id, err)
+        }
+
+        for _, v := range res.Order {
+            need[string(v)] = struct{}{}
+        }
+    }
 	return nil
 }
 
 
+
 // Interfer constraint represent the impossibility for two flags to be mixed together into one combination
-type Interfer struct {
-	Interferences map[string]map[string]struct{}
-}
+type Interfer struct {}
+
 // Interfer registers a symmetric interfer between A and B.
 // If A and B end up together in the closure of a combination, that combination
 // is considered invalid.
-func (i *Interfer) Add(a, b string) error {
+func (i *Interfer) Add(a, b string, graph *core.Graph) error {
+	ensureFlag(graph, a)
+	ensureFlag(graph, b)
+
 	if a == b {
 		// A self-interfer does not make sense; ignore defensively.
 		return fmt.Errorf("Self interference")
 	}
 
-	if i.Interferences[a] == nil {
-		i.Interferences[a] = make(map[string]struct{})
+	_, _ = 	graph.AddEdge(string(a), string(b), 0, core.WithEdgeDirected(false))
+
+	// Rollback if schema is invalid
+	if err := i.ValidateSchema(graph); err != nil {
+		i.Rollback(a, b, graph)
+		return err
 	}
-	if i.Interferences[b] == nil {
-		i.Interferences[b] = make(map[string]struct{})
-	}
-	i.Interferences[a][b] = struct{}{}
-	i.Interferences[b][a] = struct{}{}
 
 	return nil
 }
 
 func (i *Interfer) ValidateSchema(graph *core.Graph) error  {
-	for a, row := range i.Interferences {
-		for b := range row {
-			// Work with each unordered pair only once (a < b).
-			if a >= b {
-				continue
-			}
+ 	sub := core.NewGraph(core.WithDirected(true))
+    for _, v := range graph.Vertices() {
+        _ = sub.AddVertex(v)
+    }
 
-			if reachable(graph, a, b) || reachable(graph, b, a) {
-				msg := fmt.Sprintf(
-					"invalid schema: %q and %q are declared as interfering, "+
-						"but one is reachable from the other via requires edges",
-					a, b,
-				)
-				return &SchemaValidationError{
-					Kind:   ErrSchemaContradiction,
-					Detail: msg,
-				}
-			}
-		}
-	}
-	return nil
+    for _, e := range graph.Edges() {
+        if e.Directed {
+            _, _ = sub.AddEdge(e.From, e.To, e.Weight, core.WithEdgeDirected(true))
+        }
+    }
+
+    // check DAG
+    if _, err := dfs.TopologicalSort(sub); err != nil {
+        if errors.Is(err, dfs.ErrCycleDetected) {
+            return fmt.Errorf("dependency cycle detected")
+        }
+        return err
+    }
+
+    // check interference conflicts
+    for _, e := range graph.Edges() {
+        if !e.Directed {
+            from, to := e.From, e.To
+            if reachable(sub, from, to) || reachable(sub, to, from) {
+                return fmt.Errorf("interference between %s and %s conflicts with requires edges", from, to)
+            }
+        }
+    }
+
+    return nil
 }
 
 func (i *Interfer) Rollback(a, b string, graph *core.Graph) {
-	delete(i.Interferences[a], b)
-	delete(i.Interferences[b], a)
-
-	if len(i.Interferences[a]) == 0 {
-		delete(i.Interferences, a)
-	}
-	if len(i.Interferences[b]) == 0 {
-		delete(i.Interferences, b)
-	}
+	graph.RemoveVertex(a)
+	graph.RemoveVertex(b)
 }
 
-func (i *Interfer) VerifyCombination(combination map[string]struct{}, graph *core.Graph) error {
-	for a, row := range i.Interferences {
+func (i *Interfer) VerifyCombination(c *Combination, graph *core.Graph) error {
+	for a, row := range c.Set {
 		for b := range row {
 			if a >= b {
 				continue
@@ -138,44 +177,8 @@ func (i *Interfer) VerifyCombination(combination map[string]struct{}, graph *cor
 }
 
 
-// type Position struct {
-// 	SortedSlice []string
-// }
-
-// type Scale struct {
-// 	Name string
-// 	Description string
-// 	Values map[string]int
-// }
-
-// func NewScale(name, description string, values map[string]int) *Scale {
-// 	return &Scale {
-// 		Name: name,
-// 		Description: description,
-// 		Values: values,
-// 	}
-// }
-
-// // Compute the weigth of a given combination
-// func (s *Scale) ComputeWeigth(c []string) int {
-// 	var total int = 0
-// 	for _, flag := range c {
-// 		f, ok := i.Values[flag]
-// 		if ok {
-// 			total += f
-// 		}
-// 	}
-// 	return total
-// }
-
-//  //=== TODO ===
-
-// // Among a population of flag, return the highest possible combination
-// func (s *Scale) GetHighestCombination(p []string) *Combination {
-// 	return NewCombination(p)
-// }
-
-// // Among a population of flag, return the lowest possible combination
-// func (s *Scale) GetLowestCombination(p []string) *Combination {
-// 	return NewCombination(p)
-// }
+// ensureFlag makes sure there is a vertex for id in the underlying graph.
+// It is intentionally idempotent: calling it multiple times is safe.
+func ensureFlag(g *core.Graph, id string) {
+	_ = g.AddVertex(string(id))
+}

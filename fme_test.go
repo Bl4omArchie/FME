@@ -4,16 +4,16 @@ import (
 	"testing"
 )
 
+
 func TestSchema(t *testing.T) {
 	schema := NewSchema()
-	schema.AddConstraint(&Require{}, &Interfer{})
 
-	schema.Constraints[0].Add("a", "b")
-	schema.Constraints[0].Add("b", "c")
-	schema.Constraints[1].Add("c", "a")
+	schema.Constraints[0].Add("a", "b", schema.Graph)
+	schema.Constraints[0].Add("b", "c", schema.Graph)
+	schema.Constraints[1].Add("c", "a", schema.Graph)
 
 
-	if err := schema.ValidateSchema(); err != nil {
+	if ok,  err := schema.ValidateSchema(); !ok {
 		t.Fatalf("%v", err)
 	}
 }
