@@ -24,10 +24,11 @@ package fme
 // easy to explain to users.
 
 import (
-	"sort"
+	"errors"
+	"log"
 
-	"github.com/katalvlaran/lvlath/bfs"
 	"github.com/katalvlaran/lvlath/core"
+	"github.com/katalvlaran/lvlath/dfs"
 )
 
 // Schema holds the static constraint model:
@@ -41,24 +42,13 @@ import (
 //
 // The interfer map is kept separate for simplicity and cheaper lookups.
 type Schema struct {
-	Graph *core.Graph
-	Constraints []Constraint
+	Graph			*core.Graph
+
+	Interferences 	map[string]map[string]struct{}
+	
+	Constraints		[]Constraint
 }
 
-// CombinationResult is the outcome of validating a concrete user combination.
-//
-//   - Set is the closure(combination): selected Flags + all dependencies;
-type Combination struct {
-	Set []string
-	Need map[string]struct{}
-}
-
-func NewCombination(flags []string) *Combination {
-	return &Combination{
-		Set: flags,
-		Need: make(map[string]struct{}),
-	}
-}
 
 // NewSchema constructs a directed, unweighted dependency graph backed by
 // lvlath/core and an empty interfer relation.
@@ -69,16 +59,19 @@ func NewCombination(flags []string) *Combination {
 func NewSchema() *Schema {
 	var constraints []Constraint = []Constraint{&Require{}, &Interfer{}} 
 	return &Schema{
-		Graph:			core.NewGraph(core.WithMixedEdges()),
+		Graph:			core.NewGraph(core.WithDirected(true)),
+		Interferences:  map[string]map[string]struct{}{},
 		Constraints:	constraints,
 	}
 }
+
 
 func (s *Schema) AddConstraint(constraints ...Constraint) {
 	for _, c := range constraints {
 		s.Constraints = append(s.Constraints, c)
 	}
 }
+
 
 // ValidateSchema performs static validation of the constraint schema.
 //
@@ -89,7 +82,7 @@ func (s *Schema) AddConstraint(constraints ...Constraint) {
 // This function is intended to be called once at service startup.
 func (s *Schema) ValidateSchema() (bool, error) {
     for _, c := range s.Constraints {
-        if err := c.ValidateSchema(s.Graph); err != nil {
+        if err := c.ValidateSchema(s); err != nil {
             return false, err
         }
     }
@@ -104,36 +97,62 @@ func (s *Schema) ValidateSchema() (bool, error) {
 //   - returns CombinationResult and either nil or ErrCombinationInterfer.
 //
 // This is the function you would typically call per user request.
-func (s *Schema) ValidateCombination(flags []string) (*Combination, error) {
+func (s *Schema) ValidateCombination(flags []string) (*Combination, *CombinationError) {
 	var combination *Combination = NewCombination(flags)
 
     for _, c := range s.Constraints {
-        if err := c.VerifyCombination(combination, s.Graph); err != nil {
+        if err := c.VerifyCombination(combination, s); err != nil {
+			log.Println(err)
             return nil, err
         }
     }
 
-	final := make([]string, 0, len(combination.Need))
-	for id := range combination.Need {
-		final = append(final, id)
-	}
-	sort.Slice(final, func(i, j int) bool { return final[i] < final[j] })
-	combination.Set = final
-
-    return combination, nil
+	return combination, nil
 }
 
 
-// reachable runs BFS once and checks whether "to" is reachable from "from"
-// using the Depth map from BFSResult. This is enough for schema-level checks
-// where only reachability matters, not the exact path.
-func reachable(g *core.Graph, from, to string) bool {
-	res, err := bfs.BFS(g, string(from))
-	if err != nil {
-		// In a well-formed schema this should not fail; treat as not reachable.
-		return false
+// ExecutionOrder computes a deterministic execution order for the subset
+// of arguments given in args, respecting all dependency edges.
+//
+// Internally it builds an induced subgraph on the subset and runs a
+// topological sort via dfs.TopologicalSort.
+func (s *Schema) ExecutionOrder(c *Combination) ([]string, error) {
+	if len(c.Set) == 0 {
+		return nil, nil
 	}
 
-	_, ok := res.Depth[string(to)]
-	return ok
+	needed := make(map[string]struct{}, len(c.Set))
+	for _, id := range c.Set {
+		needed[string(id)] = struct{}{}
+	}
+
+	// Build an induced subgraph on the needed vertices.
+	sub := s.Graph.CloneEmpty()
+	for id := range needed {
+		_ = sub.AddVertex(id)
+	}
+
+	for _, e := range s.Graph.Edges() {
+		if _, ok := needed[e.From]; !ok {
+			continue
+		}
+		if _, ok := needed[e.To]; !ok {
+			continue
+		}
+		_, _ = sub.AddEdge(e.From, e.To, e.Weight, core.WithEdgeDirected(e.Directed))
+	}
+
+	order, err := dfs.TopologicalSort(sub)
+	if err != nil {
+		if errors.Is(err, dfs.ErrCycleDetected) {
+			// Should not happen if ValidateSchema has already passed.
+			return nil, &SchemaValidationError{
+				Kind:   ErrSchemaCycle,
+				Detail: "cycle detected in induced subgraph for selection",
+			}
+		}
+		return nil, err
+	}
+
+	return order, nil
 }

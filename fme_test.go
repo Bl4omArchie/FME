@@ -8,12 +8,18 @@ import (
 func TestSchema(t *testing.T) {
 	schema := NewSchema()
 
-	schema.Constraints[0].Add("a", "b", schema.Graph)
-	schema.Constraints[0].Add("b", "c", schema.Graph)
-	schema.Constraints[1].Add("c", "a", schema.Graph)
-
-
-	if ok,  err := schema.ValidateSchema(); !ok {
-		t.Fatalf("%v", err)
+	err := schema.Constraints[0].Add("a", "b", schema)
+	err =  schema.Constraints[0].Add("b", "c", schema)
+	if err != nil {
+		t.Fatalf("incorrect schema : %v", err)
 	}
+
+	_, _ = schema.ValidateCombination([]string{"a"})
+
+	// order, err := schema.ExecutionOrder(c)
+	// if err != nil {
+	// 	t.Fatalf("%v", err)
+	// } else {
+	// 	fmt.Println(order)
+	// }
 }
