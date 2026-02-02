@@ -8,6 +8,7 @@ import (
 var (
 	ErrSchemaCycle         = errors.New("argschema: dependency cycle")
 	ErrSchemaContradiction = errors.New("argschema: schema contradiction between dependency and interference")
+	ErrCombinationRequire  = errors.New("argschema: requirement not respected")
 	ErrCombinationInterfer = errors.New("argschema: interfering arguments in combination")
 )
 

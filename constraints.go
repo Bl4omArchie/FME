@@ -82,6 +82,8 @@ func (r *Require) VerifyCombination(c *Combination, s *Schema) *CombinationError
 	// For each selected Flag, run BFS to collect all dependencies.
 	for _, id := range c.Set {
 		res, err := bfs.BFS(s.Graph, string(id))
+		log.Println(res)
+		
 		if err != nil {
 			path := NewPathInstance(res.Order[0], res.Order[1], res.Order)
 			return NewCombinationError(path, err)
@@ -90,6 +92,8 @@ func (r *Require) VerifyCombination(c *Combination, s *Schema) *CombinationError
 			need[string(ID)] = struct{}{}
 		}
 	}
+
+	c.Need = need
 
 	// Convert to a sorted slice for deterministic output and testinGraph.
 	final := make([]string, 0, len(need))
