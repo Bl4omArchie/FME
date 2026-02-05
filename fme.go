@@ -25,11 +25,11 @@ package fme
 
 import (
 	"errors"
-	"log"
 
 	"github.com/katalvlaran/lvlath/core"
 	"github.com/katalvlaran/lvlath/dfs"
 )
+
 
 // Schema holds the static constraint model:
 //
@@ -82,7 +82,7 @@ func (s *Schema) AddConstraint(constraints ...Constraint) {
 // This function is intended to be called once at service startup.
 func (s *Schema) ValidateSchema() (bool, error) {
     for _, c := range s.Constraints {
-        if err := c.ValidateSchema(s); err != nil {
+        if err := c.SchemaValidation(s); err != nil {
             return false, err
         }
     }
@@ -97,17 +97,14 @@ func (s *Schema) ValidateSchema() (bool, error) {
 //   - returns CombinationResult and either nil or ErrCombinationInterfer.
 //
 // This is the function you would typically call per user request.
-func (s *Schema) ValidateCombination(flags []string) (*Combination, *CombinationError) {
-	var combination *Combination = NewCombination(flags)
-
+func (s *Schema) ValidateCombination(flags map[string]struct{}) (bool, error) {
     for _, c := range s.Constraints {
-        if err := c.VerifyCombination(combination, s); err != nil {
-			log.Println(err)
-            return nil, err
+        if err := c.CombinationValidation(flags, s); err != nil {
+            return false, err
         }
     }
 
-	return combination, nil
+	return true, nil
 }
 
 
@@ -122,7 +119,7 @@ func (s *Schema) ExecutionOrder(c *Combination) ([]string, error) {
 	}
 
 	needed := make(map[string]struct{}, len(c.Set))
-	for _, id := range c.Set {
+	for id := range c.Set {
 		needed[string(id)] = struct{}{}
 	}
 

@@ -2,33 +2,35 @@ package fme
 
 
 
-// CombinationResult is the outcome of validating a concrete user combination.
-//
-//  - Set is the closure(combination): selected Flags + all dependencies;
-//	- Need are depe
+// Combination is a given set of flag bind to a schema
+// 
 type Combination struct {
-	Set		[]string
+	Set			map[string]struct{}
 	
-	Need	map[string]struct{}
+	Schema		*Schema
+	
+	Valid		bool
 }
 
 
-type CombinationError struct {
-	Path *PathInstance
-	Error error
-}
+func NewCombination(flags []string, s *Schema) (*Combination, error) {
+	set := make(map[string]struct{}, len(flags))
+	for _, v := range flags {
+		set[v] = struct{}{}
+	}
 
+	ok, err := s.ValidateCombination(set)
 
-func NewCombination(flags []string) *Combination {
 	return &Combination{
-		Set: flags,
-		Need: make(map[string]struct{}),
-	}
+		Set: set,
+		Schema: s,
+		Valid: ok,
+	}, err
 }
 
-func NewCombinationError(path *PathInstance, err error) *CombinationError {
-	return &CombinationError{
-		Path: path,
-		Error: err,
-	}
+
+func (c *Combination) Update() (bool, error){
+	ok, err := c.Schema.ValidateCombination(c.Set)
+	c.Valid = ok
+	return ok, err
 }

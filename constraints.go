@@ -3,8 +3,6 @@ package fme
 import (
 	"errors"
 	"fmt"
-	"log"
-	"sort"
 
 	"github.com/katalvlaran/lvlath/bfs"
 	"github.com/katalvlaran/lvlath/dfs"
@@ -19,15 +17,15 @@ type Constraint interface {
 
 	// Take every rules and verify there is no conflict between them and rules from other constraints
 	// If there is a conflict, the schema is rolled back to keep its integrity
-	ValidateSchema(s *Schema) error
+	SchemaValidation(s *Schema) error
+
+
+	// Take a given set of flags and apply each rules
+	CombinationValidation(c map[string]struct{}, s *Schema) error
 
 
 	// RollBack operation in case of schema integrity failure
 	Rollback(a, b string, s *Schema)
-
-
-	// Take a given set of flags and apply each rules
-	VerifyCombination(c *Combination, s *Schema) *CombinationError
 }
 
 
@@ -43,15 +41,15 @@ func (r *Require) Add(a, b string, s *Schema) error {
 	_, _ = s.Graph.AddEdge(string(a), string(b), 0)
 
 	// Rollback if schema is invalid
-	if err := r.ValidateSchema(s); err != nil {
+	if err := r.SchemaValidation(s); err != nil {
 		r.Rollback(a, b, s)
 		return err
 	}
 	return nil
 }
 
-// Verify the integrity of the graph for Require constraint
-func (r *Require) ValidateSchema(s *Schema) error {
+
+func (r *Require) SchemaValidation(s *Schema) error {
 	if _, err := dfs.TopologicalSort(s.Graph); err != nil {
 		if errors.Is(err, dfs.ErrCycleDetected) {
 			return &SchemaValidationError{
@@ -65,46 +63,46 @@ func (r *Require) ValidateSchema(s *Schema) error {
 	return nil
 }
 
-// If the Schema is invalid, Rollback() deletes the two vertex in the graph
-func (r *Require) Rollback(a, b string, s *Schema) {
-	s.Graph.RemoveVertex(a)
-	s.Graph.RemoveVertex(b)
-}
 
-func (r *Require) VerifyCombination(c *Combination, s *Schema) *CombinationError {
+func (r *Require) CombinationValidation(c map[string]struct{}, s *Schema) error {
 	need := make(map[string]struct{})
 
 	// Make sure all selected Flags exist as vertices.
-	for _, id := range c.Set {
+	for id := range c {
 		ensureFlag(s.Graph, id)
 	}
 
 	// For each selected Flag, run BFS to collect all dependencies.
-	for _, id := range c.Set {
-		res, err := bfs.BFS(s.Graph, string(id))
-		log.Println(res)
-		
+	for flagID := range c {
+		res, err := bfs.BFS(s.Graph, string(flagID))
 		if err != nil {
-			path := NewPathInstance(res.Order[0], res.Order[1], res.Order)
-			return NewCombinationError(path, err)
+			return &CombinationVerificationError{
+				Kind: ErrCombinationRequire,
+				Detail: "BFS failed for requirement constraints combination verification",
+				Path: nil,
+			}
 		}
 		for _, ID := range res.Order {
-			need[string(ID)] = struct{}{}
+			depID := string(ID)
+			need[depID] = struct{}{}
+
+			if _, ok := c[depID]; !ok {
+				return &CombinationVerificationError{
+					Kind:   ErrCombinationRequire,
+					Detail: "missing required dependency: " + depID,
+					Path:   ShortestPath(flagID, depID, s.Graph),
+				}
+			}
 		}
 	}
 
-	c.Need = need
-
-	// Convert to a sorted slice for deterministic output and testinGraph.
-	final := make([]string, 0, len(need))
-	for id := range need {
-		final = append(final, id)
-	}
-	sort.Slice(final, func(i, j int) bool { return final[i] < final[j] })
-
-	log.Println(final, need)
-
 	return nil
+}
+
+
+func (r *Require) Rollback(a, b string, s *Schema) {
+	s.Graph.RemoveVertex(a)
+	s.Graph.RemoveVertex(b)
 }
 
 
@@ -133,7 +131,7 @@ func (i *Interfer) Add(a, b string, s *Schema) error {
 	s.Interferences[b][a] = struct{}{}
 
 	// Rollback if schema is invalid
-	if err := i.ValidateSchema(s); err != nil {
+	if err := i.SchemaValidation(s); err != nil {
 		i.Rollback(a, b, s)
 		return err
 	}
@@ -141,7 +139,8 @@ func (i *Interfer) Add(a, b string, s *Schema) error {
 	return nil
 }
 
-func (i *Interfer) ValidateSchema(s *Schema) error  {
+
+func (i *Interfer) SchemaValidation(s *Schema) error  {
 	for a, row := range s.Interferences {
 		for b := range row {
 			// Work with each unordered pair only once (a < b).
@@ -166,23 +165,29 @@ func (i *Interfer) ValidateSchema(s *Schema) error  {
     return nil
 }
 
-func (i *Interfer) Rollback(a, b string, s *Schema) {
-	s.Graph.RemoveVertex(a)
-	s.Graph.RemoveVertex(b)
-}
 
-func (i *Interfer) VerifyCombination(c *Combination, s *Schema) *CombinationError {
+func (i *Interfer) CombinationValidation(c map[string]struct{}, s *Schema) error {
 	for a, row := range s.Interferences {
 		for b := range row {
 			if a >= b {
 				continue
 			}
-			_, hasA := c.Need[a]
-			_, hasB := c.Need[b]
+			_, hasA := c[a]
+			_, hasB := c[b]
 			if hasA && hasB {
-				return NewCombinationError(ShortestPath(a, b, s.Graph), ErrCombinationInterfer)
+				return &CombinationVerificationError{
+					Kind: ErrCombinationInterfer,
+					Detail: "Failed combination verification for interference constraints",
+					Path: ShortestPath(a, b, s.Graph),
+				}
 			}
 		}
 	}
 	return nil
+}
+
+
+func (i *Interfer) Rollback(a, b string, s *Schema) {
+	s.Graph.RemoveVertex(a)
+	s.Graph.RemoveVertex(b)
 }

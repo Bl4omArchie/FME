@@ -27,4 +27,3 @@ func reachable(g *core.Graph, from, to string) bool {
 func ensureFlag(g *core.Graph, id string) {
 	_ = g.AddVertex(string(id))
 }
-
