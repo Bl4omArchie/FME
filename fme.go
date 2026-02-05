@@ -25,11 +25,11 @@ package fme
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/katalvlaran/lvlath/core"
 	"github.com/katalvlaran/lvlath/dfs"
 )
-
 
 // Schema holds the static constraint model:
 //
@@ -46,7 +46,7 @@ type Schema struct {
 
 	Interferences 	map[string]map[string]struct{}
 	
-	Constraints		[]Constraint
+	Constraints		map[string]Constraint
 }
 
 
@@ -56,8 +56,7 @@ type Schema struct {
 // Complexity of operations on this structure is dominated by BFS/DFS:
 //   - Schema validation: O(V + E + C * (V + E)) in the worst case;
 //   - Combination validation: O(|S| * (V + E) + C) for practical sizes.
-func NewSchema() *Schema {
-	var constraints []Constraint = []Constraint{&Require{}, &Interfer{}} 
+func NewSchema(constraints map[string]Constraint) *Schema {
 	return &Schema{
 		Graph:			core.NewGraph(core.WithDirected(true)),
 		Interferences:  map[string]map[string]struct{}{},
@@ -66,9 +65,11 @@ func NewSchema() *Schema {
 }
 
 
-func (s *Schema) AddConstraint(constraints ...Constraint) {
-	for _, c := range constraints {
-		s.Constraints = append(s.Constraints, c)
+func (s *Schema) AddConstraint(key, a, b string) error {
+	if ok := s.Constraints[key]; ok == nil {
+		return fmt.Errorf("incorrect constraint key, couldn't find : %s", key)
+	} else {
+		return ok.Add(a, b, s)
 	}
 }
 

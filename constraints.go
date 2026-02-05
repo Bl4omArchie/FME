@@ -29,7 +29,6 @@ type Constraint interface {
 }
 
 
-
 // Require constraint represent a depedency between two flags
 type Require struct {}
 
