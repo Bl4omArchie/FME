@@ -64,13 +64,13 @@ More ideas.
 
 ## Glossary
 
-- Flag : a simple string. It can be a foreign key or simply a word. 
-- Schema : a set of flags with defined rules
-- Combination : a sub-set of flags from Schema that should respect the given rules
-- Conflict : incoherencies for rules or combinations
+- Flag : a simple string that represent your data.
+- Schema : actual engine that handle the constraints between your flags.
+- Combination : a set of flags respecting the rules from the Schema.
+- Conflict : incorrect rule or combination.
 - Rules : constraints between flags that defines if a combination is valid or not
     - Requires : a dependency between two flags where b must go with a
-    - Interfere : two flags cannot be mixed together into the same combination
+    - Interferes : two flags cannot be mixed together into the same combination
     - Position: relative ordering constraints.
     - Position At: fixed index.
     - Scale At: weighted intensity grouping.

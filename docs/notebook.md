@@ -139,8 +139,10 @@ There is a summary of every algorithms we saw in this notebook.
     - Requires : a dependency between two flags where b must go with a
     - Interfere : two flags cannot be mixed together into the same combination
 
-- Flag :
-- Schema :
-- Combination :
-- Constraint :
-- Conflict :
+- Flag : a simple string that represent your data.
+- Schema : actual engine that handle the constraints between your flags.
+- Combination : a set of flags respecting the rules from the Schema.
+- Conflict : incorrect rule or combination.
+- Rules : constraints between flags that defines if a combination is valid or not
+    - Requires : a dependency between two flags where b must go with a
+    - Interferes : two flags cannot be mixed together into the same combination
