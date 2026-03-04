@@ -12,13 +12,13 @@ func TestSchema(t *testing.T) {
 	_ = schema.AddConstraint("req", "a", "b")
 	_ =  schema.AddConstraint("req", "b", "c")
 	err := schema.AddConstraint("interfer", "c", "a")
-	if err != nil {
-		t.Fatalf("incorrect schema : %v", err)
+	if err == nil {
+		t.Fatalf("invalid schema accepted : %v", err)
 	}
 
 	_, err = NewCombination([]string{"a", "b", "c"}, schema)
-	if err != nil {
-		t.Fatalf("incorrect combination : %v", err)
+	if err == nil {
+		t.Fatalf("invalid combination accepted : %v", err)
 	}
 }
 
