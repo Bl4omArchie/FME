@@ -64,8 +64,12 @@ func NewSchema(constraints map[string]Constraint) *Schema {
 	}
 }
 
+func InitSchema() *Schema {
+	return NewSchema(map[string]Constraint{"req": &Require{}, "interfer": &Interfer{}})
+}
 
-func (s *Schema) AddConstraint(key, a, b string) error {
+
+func (s *Schema) Add(key, a, b string) error {
 	if ok := s.Constraints[key]; ok == nil {
 		return fmt.Errorf("incorrect constraint key, couldn't find : %s", key)
 	} else {

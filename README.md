@@ -39,7 +39,7 @@ func main() {
     script := "myexecutable.sh"
     parameters := []string{"-i", "-t", "-filepath", "-folderpath", "-dest"}
 	
-    schema := NewSchema(map[string]Constraint{"req": &Require{}, "interfer": &Interfer{}})
+    schema := InitSchema()
 
 	schema.AddConstraint("req", "-i", "-filepath")
 	schema.AddConstraint("req", "-t", "-folderpath")

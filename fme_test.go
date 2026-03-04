@@ -7,11 +7,11 @@ import (
 
 // Test schema + combination validation
 func TestSchema(t *testing.T) {
-	schema := NewSchema(map[string]Constraint{"req": &Require{}, "interfer": &Interfer{}})
+	schema := InitSchema()
 
-	_ = schema.AddConstraint("req", "a", "b")
-	_ =  schema.AddConstraint("req", "b", "c")
-	err := schema.AddConstraint("interfer", "c", "a")
+	_ = schema.Add("req", "a", "b")
+	_ =  schema.Add("req", "b", "c")
+	err := schema.Add("interfer", "c", "a")
 	if err == nil {
 		t.Fatalf("invalid schema accepted : %v", err)
 	}
@@ -26,11 +26,11 @@ func TestSchema(t *testing.T) {
 // Test incorrect interference cases
 // i.e : a->b ; b->c ; c-/->a
 func TestInterference(t *testing.T) {
-	schema := NewSchema(map[string]Constraint{"req": &Require{}, "interfer": &Interfer{}})
+	schema := InitSchema()
 
-	_ = schema.AddConstraint("req", "a", "b")
-	_ = schema.AddConstraint("req", "b", "c")
-	if err := schema.AddConstraint("interfer", "c", "a"); err == nil {
+	_ = schema.Add("req", "a", "b")
+	_ = schema.Add("req", "b", "c")
+	if err := schema.Add("interfer", "c", "a"); err == nil {
 		t.Fatalf("TestConflict #1 : interference was accepted")
 	}
 }
@@ -38,10 +38,10 @@ func TestInterference(t *testing.T) {
 
 // Test cycle depedency
 func TestCycleDependency(t *testing.T) {
-	schema := NewSchema(map[string]Constraint{"req": &Require{}, "interfer": &Interfer{}})
+	schema := InitSchema()
 	
-	_ = schema.AddConstraint("req", "a", "b")
-	if err := schema.AddConstraint("req", "b", "a"); err == nil {
+	_ = schema.Add("req", "a", "b")
+	if err := schema.Add("req", "b", "a"); err == nil {
 		t.Fatalf("TestConflict #2 : cycle dependency was accepted")
 	}
 }
