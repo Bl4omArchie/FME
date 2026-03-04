@@ -9,28 +9,14 @@ type Combination struct {
 	
 	Schema		*Schema
 	
-	Valid		bool
+	Error		error
 }
 
 
-func NewCombination(flags []string, s *Schema) (*Combination, error) {
-	set := make(map[string]struct{}, len(flags))
-	for _, v := range flags {
-		set[v] = struct{}{}
-	}
-
-	ok, err := s.ValidateCombination(set)
-
+func NewCombination(flags map[string]struct{}, schema *Schema, err error) *Combination {
 	return &Combination{
-		Set: set,
-		Schema: s,
-		Valid: ok,
-	}, err
-}
-
-
-func (c *Combination) Update() (bool, error){
-	ok, err := c.Schema.ValidateCombination(c.Set)
-	c.Valid = ok
-	return ok, err
+		Set: flags,
+		Schema: schema,
+		Error: err,
+	}
 }

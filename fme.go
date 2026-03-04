@@ -78,6 +78,17 @@ func (s *Schema) Add(key, a, b string) error {
 }
 
 
+func (s *Schema) Combination(flags []string) *Combination {
+	set := make(map[string]struct{}, len(flags))
+	for _, v := range flags {
+		set[v] = struct{}{}
+	}
+
+	_, err := s.ValidateCombination(set)
+	return NewCombination(set, s, err)
+}
+
+
 // ValidateSchema performs static validation of the constraint schema.
 //
 //  1. Ensures that the dependency graph is a DAG via dfs.TopologicalSort.

@@ -16,8 +16,8 @@ func TestSchema(t *testing.T) {
 		t.Fatalf("invalid schema accepted : %v", err)
 	}
 
-	_, err = NewCombination([]string{"a", "b", "c"}, schema)
-	if err == nil {
+	c := schema.Combination([]string{"a", "b", "c"})
+	if c.Error == nil {
 		t.Fatalf("invalid combination accepted : %v", err)
 	}
 }
