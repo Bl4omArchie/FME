@@ -78,17 +78,6 @@ func (s *Schema) Add(key, a, b string) error {
 }
 
 
-func (s *Schema) Combination(flags []string) *Combination {
-	set := make(map[string]struct{}, len(flags))
-	for _, v := range flags {
-		set[v] = struct{}{}
-	}
-
-	_, err := s.ValidateCombination(set)
-	return NewCombination(set, s, err)
-}
-
-
 // ValidateSchema performs static validation of the constraint schema.
 //
 //  1. Ensures that the dependency graph is a DAG via dfs.TopologicalSort.
@@ -113,14 +102,19 @@ func (s *Schema) ValidateSchema() (bool, error) {
 //   - returns CombinationResult and either nil or ErrCombinationInterfer.
 //
 // This is the function you would typically call per user request.
-func (s *Schema) ValidateCombination(flags map[string]struct{}) (bool, error) {
+func (s *Schema) ValidateCombination(flags []string) *Combination {
+	set := make(map[string]struct{}, len(flags))
+	for _, v := range flags {
+		set[v] = struct{}{}
+	}
+
     for _, c := range s.Constraints {
-        if err := c.CombinationValidation(flags, s); err != nil {
-            return false, err
+        if err := c.CombinationValidation(set, s); err != nil {
+            return NewCombination(set, s, err)
         }
     }
 
-	return true, nil
+	return NewCombination(set, s, nil)
 }
 
 

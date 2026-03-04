@@ -47,8 +47,8 @@ func main() {
     schema.AddConstraint("req", "-t", "-dest")
 	schema.AddConstraint("interfer", "-i", "-t")
 
-	_, err = NewCombination([]string{"a", "b", "c"}, schema)
-	if err == nil {
+	c := schema.ValidateCombination([]string{"a", "b", "c"})
+	if c.Error == nil {
 		t.Fatalf("invalid combination accepted : %v", err)
 	}
 }
