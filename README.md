@@ -1,7 +1,6 @@
 # FME - Flag Matching Engine
 
-
-FME is a golang written program build atop lvlath library that answer a specific coding challenge.
+FME is a Golang written program built on lvlath library that answers a specific coding challenge.
 
 Let's say you have a set of flags, it can be anything like command parameters or simply characters.
 You want to combine them with each other and create a combination of flags.
